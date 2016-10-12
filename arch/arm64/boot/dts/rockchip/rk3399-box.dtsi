@@ -953,11 +953,15 @@
 	status = "okay";
 };
 
+&vopl_rk_fb {
+	status = "okay";
+};
+/*
 &fb {
 	rockchip,disp-mode = <NO_DUAL>;
 	rockchip,disp-policy = <DISPLAY_POLICY_BOX>;
 };
-
+*/
 &hdmi_rk_fb {
 	status = "okay";
 	rockchip,hdmi_video_source = <DISPLAY_SOURCE_LCDC0>;
@@ -971,6 +975,7 @@
 	status = "okay";
 	extcon = <&fusb0>;
 	phys = <&tcphy0 0>;
+	dp_vop_sel = <DISPLAY_SOURCE_LCDC1>;
 };
 
 &i2s2 {
