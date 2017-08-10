@@ -18,6 +18,7 @@
 #include <linux/regmap.h>
 #include <linux/platform_device.h>
 #include <linux/spi/spi.h>
+#include <linux/of_gpio.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -25,11 +26,18 @@
 #include <sound/soc-dapm.h>
 #include <sound/initval.h>
 #include <sound/tlv.h>
+#include <linux/pm_runtime.h>
 
 #include <linux/clk.h>
+#include <linux/gpio.h>
 #include "rl6231.h"
 #include "rt5651.h"
 
+static int spk_ctl_status;	
+//static int spk_ctl_gpio;
+static int spk_active_level;
+
+static int spk_yyd_mute_gpio,spk_yyd_en_gpio,spk_ctl_gpio,mic_yyd_pwren_gpio;	
 #define RT5651_DEVICE_ID_VALUE 0x6281
 
 #define RT5651_PR_RANGE_BASE (0xff + 1)
@@ -313,6 +321,38 @@ static SOC_ENUM_SINGLE_DECL(rt5651_if2_dac_enum, RT5651_DIG_INF_DATA,
 static SOC_ENUM_SINGLE_DECL(rt5651_if2_adc_enum, RT5651_DIG_INF_DATA,
 				RT5651_IF2_ADC_SEL_SFT, rt5651_data_select);
 
+static const char * rt5651_spk_ctr_sel[] = {"Off", "On"};
+static const struct soc_enum spk_ctr_enum =
+        SOC_ENUM_SINGLE_EXT(2, rt5651_spk_ctr_sel);
+        
+static int rt5651_spk_ctr_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = spk_ctl_status;
+	return 0;
+}
+
+static int rt5651_spk_ctr_put(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	int level;
+	
+	spk_ctl_status = ucontrol->value.integer.value[0];
+	dev_err(NULL, "ffffff rt5651_spk_ctr_put=%d\n",spk_ctl_status);
+	if(spk_ctl_gpio >= 0)
+	{
+		level = spk_ctl_status ? spk_active_level : !spk_active_level;
+
+		//gpio_direction_output(spk_yyd_en_gpio, 1);
+		//gpio_direction_output(spk_yyd_mute_gpio, 1);
+		
+		gpio_set_value(spk_ctl_gpio, level);
+		//gpio_set_value(spk_yyd_mute_gpio, !level);
+		//gpio_set_value(spk_yyd_en_gpio, level);
+	}
+	return 0;
+}
+
 static const struct snd_kcontrol_new rt5651_snd_controls[] = {
 	/* Headphone Output Volume */
 	SOC_DOUBLE_TLV("HP Playback Volume", RT5651_HP_VOL,
@@ -363,6 +403,7 @@ static const struct snd_kcontrol_new rt5651_snd_controls[] = {
 
 	SOC_ENUM("ADC IF2 Data Switch", rt5651_if2_adc_enum),
 	SOC_ENUM("DAC IF2 Data Switch", rt5651_if2_dac_enum),
+	SOC_ENUM_EXT("Speaker Amplifier Switch", spk_ctr_enum, rt5651_spk_ctr_get, rt5651_spk_ctr_put),
 };
 
 /**
@@ -1667,6 +1708,19 @@ static int rt5651_resume(struct snd_soc_codec *codec)
 #define rt5651_suspend NULL
 #define rt5651_resume NULL
 #endif
+static int rt5651_digital_mute(struct snd_soc_dai *dai, int mute)
+{
+	gpio_direction_output(spk_yyd_en_gpio, 1);
+	gpio_direction_output(spk_yyd_mute_gpio, 1);
+
+	gpio_set_value(spk_yyd_mute_gpio, 0);
+			
+	if(mute)gpio_set_value(spk_yyd_en_gpio, 0);
+	else gpio_set_value(spk_yyd_en_gpio, 1);
+		
+	//printk("rt5651_digital_mute==%d\n",mute);
+	return 0;
+}
 
 #define RT5651_STEREO_RATES SNDRV_PCM_RATE_8000_96000
 #define RT5651_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE | \
@@ -1677,6 +1731,7 @@ static const struct snd_soc_dai_ops rt5651_aif_dai_ops = {
 	.set_fmt = rt5651_set_dai_fmt,
 	.set_sysclk = rt5651_set_dai_sysclk,
 	.set_pll = rt5651_set_dai_pll,
+	.digital_mute	= rt5651_digital_mute,
 };
 
 static struct snd_soc_dai_driver rt5651_dai[] = {
@@ -1761,7 +1816,10 @@ static int rt5651_i2c_probe(struct i2c_client *i2c,
 {
 	struct rt5651_platform_data *pdata = dev_get_platdata(&i2c->dev);
 	struct rt5651_priv *rt5651;
+	enum of_gpio_flags flags;
+	struct device_node *np = i2c->dev.of_node;
 	int ret;
+	
 
 	rt5651 = devm_kzalloc(&i2c->dev, sizeof(*rt5651),
 				GFP_KERNEL);
@@ -1769,7 +1827,58 @@ static int rt5651_i2c_probe(struct i2c_client *i2c,
 		return -ENOMEM;
 
 	i2c_set_clientdata(i2c, rt5651);
+	
+	spk_ctl_gpio = of_get_named_gpio_flags(np,
+						       "spk-con-gpio",
+						       0,
+						       &flags);
+	spk_yyd_en_gpio= of_get_named_gpio_flags(np,
+						       "spk-yyd-en-gpio",
+						       0,
+						       &flags);
+	spk_yyd_mute_gpio = of_get_named_gpio_flags(np,
+						       "spk-yyd-mute-gpio",
+						       0,
+						       &flags);
+	mic_yyd_pwren_gpio= of_get_named_gpio_flags(np,
+						       "mic-yyd-pwren-gpio",
+						       0,
+						       &flags);
+	//if(spk_yyd_en_gpio <0 || spk_yyd_mute_gpio <0)dev_err(&i2c->dev, "ffffff request spk_ctl_gpio\n");
+	
+	if (spk_ctl_gpio < 0) {
+		dev_info(&i2c->dev, "Can not read property spk_ctl_gpio\n");
+		spk_ctl_gpio = -1;
+	} else {
+		spk_active_level = !(flags & OF_GPIO_ACTIVE_LOW);
+		ret = devm_gpio_request_one(&i2c->dev, spk_yyd_en_gpio,
+					    GPIOF_DIR_OUT, NULL);
+		
+		ret = devm_gpio_request_one(&i2c->dev, spk_yyd_mute_gpio,
+					    GPIOF_DIR_OUT, NULL);
 
+		ret = devm_gpio_request_one(&i2c->dev, mic_yyd_pwren_gpio,
+					    GPIOF_DIR_OUT, NULL);
+		
+		ret = devm_gpio_request_one(&i2c->dev, spk_ctl_gpio,
+					    GPIOF_DIR_OUT, NULL);
+		if (ret) {
+			dev_err(&i2c->dev, "Failed to request spk_ctl_gpio\n");
+			return ret;
+		}
+
+		gpio_direction_output(spk_yyd_en_gpio, 1);
+		gpio_direction_output(spk_yyd_mute_gpio, 1);
+		gpio_direction_output(mic_yyd_pwren_gpio, 1);
+		
+		spk_ctl_status = 0;
+		gpio_set_value(spk_ctl_gpio, !spk_active_level);
+		gpio_set_value(spk_yyd_en_gpio, !spk_active_level);
+		gpio_set_value(spk_yyd_mute_gpio, !spk_active_level);
+		gpio_set_value(mic_yyd_pwren_gpio, 1);
+		dev_err(&i2c->dev, "ffffff333 request spk_ctl_gpio\n");
+	}
+	
 	if (pdata)
 		rt5651->pdata = *pdata;
 
