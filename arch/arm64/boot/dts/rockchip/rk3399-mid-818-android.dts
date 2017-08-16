@@ -1203,9 +1203,9 @@
 &rk_screen {
 	assigned-clocks = <&cru PLL_VPLL>;
 	assigned-clock-rates = <245000000>;
-	#include "lcd-mipi-7inch-wy070ml.dtsi" 
+	/*#include "lcd-mipi-7inch-wy070ml.dtsi"*/
 	/* #include "lcd-CEC133-IFAD.dtsi" */
-	/* #include "lcd-mipi-8inch-H080IVl.dtsi"*/
+	#include "lcd-mipi-8inch-H080IVl.dtsi"
 };
 
 &vopb_rk_fb {
