@@ -938,7 +938,7 @@
 	rx_delay = <0x11>;
 	status = "okay";
 };
-
+/*
 &isp0 {
 	status = "okay";
 };
@@ -946,7 +946,7 @@
 &isp1 {
 	status = "okay";
 };
-
+*/
 &cpu_l0 {
 	cpu-supply = <&vdd_cpu_l>;
 };
